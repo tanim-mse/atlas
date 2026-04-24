@@ -165,7 +165,34 @@ begin
 end $$;
 
 -- =========================================================
--- PASSKEYS (WebAuthn credentials) — stored per user
+-- AUTO user_id trigger — sets user_id = auth.uid() on every insert
+-- so client code doesn't need to pass it explicitly.
+-- =========================================================
+create or replace function public.set_user_id()
+returns trigger language plpgsql security definer as $$
+begin
+  new.user_id := auth.uid();
+  return new;
+end;
+$$;
+
+do $$
+declare
+  t text;
+begin
+  for t in select unnest(array[
+    'journal_entries','habits','habit_logs','goals','milestones',
+    'media_log','gaming_sessions','edit_projects','transactions','health_logs'
+  ])
+  loop
+    execute format('drop trigger if exists trg_set_user_id on %I', t);
+    execute format(
+      'create trigger trg_set_user_id before insert on %I for each row execute function public.set_user_id()',
+      t
+    );
+  end loop;
+end $$;
+
 -- Pure-client WebAuthn would need a verification server;
 -- we use Supabase's built-in MFA enrollment instead at runtime
 -- and keep this table for credential metadata only.
