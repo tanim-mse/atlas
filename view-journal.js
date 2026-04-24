@@ -1,10 +1,12 @@
 import { sb } from "./supabase-client.js";
 import { $, el, isoDate, longDate, prettyDate, relativeDate, debounce, toast, modal } from "./util.js";
 
-let state = { entries: [], current: null, dirty: false };
+let state = { entries: [], current: null, dirty: false, userId: null };
 
 export async function renderJournal(root, user) {
   root.innerHTML = "";
+  state.userId = user.id;
+
   const layout = el("div", { class: "journal" });
   root.appendChild(layout);
 
@@ -15,7 +17,7 @@ export async function renderJournal(root, user) {
 
   await loadEntries();
   renderList(listCol);
-  await openToday(user.id, editorCol, listCol);
+  await openToday(editorCol, listCol);
 }
 
 async function loadEntries() {
@@ -56,7 +58,7 @@ function renderList(col) {
   });
 }
 
-async function openToday(userId, editorCol, listCol) {
+async function openToday(editorCol, listCol) {
   const existing = state.entries.find(e => e.entry_date === isoDate());
   if (existing) openEntry(existing, editorCol, listCol);
   else openDate(isoDate(), editorCol, listCol);
@@ -208,10 +210,12 @@ const autosave = debounce(async (listCol) => {
   };
   if (e.id) {
     const { error } = await sb.from("journal_entries").update(payload).eq("id", e.id);
-    if (error) { setStatus("error"); return; }
+    if (error) { console.error("Journal update error:", error); setStatus("error: " + error.message); return; }
   } else {
-    const { data, error } = await sb.from("journal_entries").insert(payload).select().single();
-    if (error) { setStatus("error"); return; }
+    const { data, error } = await sb.from("journal_entries")
+      .insert({ ...payload, user_id: state.userId })
+      .select().single();
+    if (error) { console.error("Journal insert error:", error); setStatus("error: " + error.message); return; }
     e.id = data.id; delete e._draft;
   }
   state.dirty = false;
