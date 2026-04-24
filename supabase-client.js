@@ -9,6 +9,18 @@ export const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPAB
   }
 });
 
+// Wraps sb.from(table).insert() to always include user_id from current session.
+// Usage: await insertOwned("habits", { name: "..." })
+export async function insertOwned(table, payload) {
+  const { data: { user } } = await sb.auth.getUser();
+  const uid = user?.id;
+  if (!uid) throw new Error("Not authenticated");
+  const rows = Array.isArray(payload)
+    ? payload.map(r => ({ ...r, user_id: uid }))
+    : { ...payload, user_id: uid };
+  return sb.from(table).insert(rows).select();
+}
+
 export async function signInWithPassword(email, password) {
   if (email.toLowerCase() !== CONFIG.OWNER_EMAIL.toLowerCase()) {
     throw new Error("This instance of Atlas is private.");
@@ -37,10 +49,6 @@ export async function currentUser() {
 }
 
 // ---------- Passkey (WebAuthn via Supabase MFA) ----------
-// Supabase supports WebAuthn enrollment as a second factor.
-// First-time: user signs in with password, then enrolls a passkey.
-// Subsequent sign-ins: "Sign in with passkey" calls challenge() + verify().
-
 export async function hasPasskey() {
   const { data, error } = await sb.auth.mfa.listFactors();
   if (error) return false;
@@ -65,8 +73,6 @@ export async function enrollPasskey(label = "This device") {
 
 export async function signInWithPasskey() {
   if (!window.PublicKeyCredential) throw new Error("Passkeys aren't supported on this browser.");
-  // Passkeys in Supabase require an existing session to challenge against.
-  // If no session, fall back to asking user to sign in with password first.
   const user = await currentUser();
   if (!user) throw new Error("Sign in once with your password, then enroll a passkey.");
   const { data: list } = await sb.auth.mfa.listFactors();
