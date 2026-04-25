@@ -33,11 +33,11 @@ export async function renderHabits(root, user) {
 }
 
 function habitCard(habit, logs, refresh) {
-  const card = el("article", { class: "habit" });
+  const card = el("article", { class: "habit", style: { "--habit-color": habit.color || "#8b5cff" } });
   const head = el("div", { class: "habit__head" });
-  head.appendChild(el("div", { class: "habit__icon", style: { color: habit.color } }, habit.icon || "✦"));
+  head.appendChild(el("div", { class: "habit__icon" }, habit.icon || "✦"));
   const streak = computeStreak(habit.id, logs);
-  if (streak > 0) head.appendChild(el("div", { class: "habit__streak" }, `${streak}D STREAK`));
+  if (streak > 0) head.appendChild(el("div", { class: "habit__streak" }, `🔥 ${streak}D`));
   card.appendChild(head);
 
   card.appendChild(el("h3", { class: "habit__name" }, habit.name));
