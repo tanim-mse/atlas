@@ -1,5 +1,5 @@
 import { CONFIG } from "./config.js";
-import { sb, signInWithPassword, signUp, signOut, currentUser, signInWithPasskey, enrollPasskey, hasPasskey } from "./supabase-client.js";
+import { sb, signInWithPassword, signUp, signOut, currentUser, signInWithPasskey, hasPasskey } from "./supabase-client.js";
 import { $, el, longDate, toast } from "./util.js";
 
 import { renderToday } from "./view-today.js";
@@ -9,11 +9,7 @@ import { renderMood } from "./view-mood.js";
 import { renderGoals } from "./view-goals.js";
 import { renderMedia, renderGaming, renderEdits, renderFinance, renderHealth } from "./view-tables.js";
 
-// =========================================================
-// BOOT
-// =========================================================
 (async function boot() {
-  // Let the intro breathe
   await sleep(1800);
   document.getElementById("boot").style.display = "none";
 
@@ -27,9 +23,6 @@ import { renderMedia, renderGaming, renderEdits, renderFinance, renderHealth } f
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// =========================================================
-// AUTH SCREEN
-// =========================================================
 function showAuth() {
   const auth = document.getElementById("auth");
   auth.classList.remove("hidden");
@@ -50,7 +43,6 @@ function showAuth() {
     submitBtn.querySelector(".btn__label").textContent = mode === "signin" ? "Enter Atlas" : "Create account";
   }));
 
-  // Prefill owner email for convenience
   emailIn.value = CONFIG.OWNER_EMAIL;
 
   form.addEventListener("submit", async (e) => {
@@ -93,69 +85,79 @@ async function onSignedIn(user) {
   document.getElementById("auth").classList.add("hidden");
   showApp(user);
 
-  // Offer passkey enrollment on first sign-in
   if (!(await hasPasskey()) && window.PublicKeyCredential) {
-    setTimeout(() => {
-      toast("Tip: enroll a passkey for one-tap sign-in next time.");
-    }, 1500);
+    setTimeout(() => toast("Tip: enroll a passkey for one-tap sign-in next time."), 1500);
   }
 }
 
-// =========================================================
-// APP SHELL + ROUTER
-// =========================================================
 const ROUTES = {
-  today: { title: "Today", render: renderToday, showDate: true },
+  today:   { title: "Today",   render: renderToday,   showDate: true },
   journal: { title: "Journal", render: renderJournal },
-  habits: { title: "Habits", render: renderHabits },
-  mood: { title: "Mood", render: renderMood },
-  goals: { title: "Goals", render: renderGoals },
-  media: { title: "Media", render: renderMedia },
-  gaming: { title: "Gaming", render: renderGaming },
-  edits: { title: "Edits", render: renderEdits },
+  habits:  { title: "Habits",  render: renderHabits },
+  mood:    { title: "Mood",    render: renderMood },
+  goals:   { title: "Goals",   render: renderGoals },
+  media:   { title: "Media",   render: renderMedia },
+  gaming:  { title: "Gaming",  render: renderGaming },
+  edits:   { title: "Edits",   render: renderEdits },
   finance: { title: "Finance", render: renderFinance },
-  health: { title: "Health", render: renderHealth }
+  health:  { title: "Health",  render: renderHealth }
 };
 
 let currentUserRef = null;
-let navigating = false;
+let currentView = null;
+let renderToken = 0;
 
 function showApp(user) {
   currentUserRef = user;
   document.getElementById("app").classList.remove("hidden");
+
+  // Restore collapse preference
+  if (localStorage.getItem("atlas-rail-collapsed") === "1") {
+    document.getElementById("app").classList.add("is-collapsed");
+  }
 
   // Rail nav
   document.querySelectorAll(".rail__link[data-view]").forEach(link => {
     link.addEventListener("click", () => navigate(link.dataset.view));
   });
 
-  // Sign out
+  // Rail collapse toggle
+  document.getElementById("rail-toggle").addEventListener("click", () => {
+    const app = document.getElementById("app");
+    app.classList.toggle("is-collapsed");
+    localStorage.setItem("atlas-rail-collapsed", app.classList.contains("is-collapsed") ? "1" : "0");
+  });
+
   document.getElementById("sign-out").addEventListener("click", async () => {
     await signOut();
     location.reload();
   });
 
-  // Custom navigate event (used from inside views)
+  // External navigate event
   window.addEventListener("atlas:navigate", (e) => navigate(e.detail));
 
-  // Deep-link via hash
+  // Hash sync — only navigate when hash actually changes from current view
+  window.addEventListener("hashchange", () => {
+    const v = (location.hash || "#today").slice(1);
+    if (ROUTES[v] && v !== currentView) navigate(v);
+  });
+
   const initial = (location.hash || "#today").slice(1);
   navigate(ROUTES[initial] ? initial : "today");
-
-  window.addEventListener("hashchange", () => {
-    if (navigating) return;
-    const view = (location.hash || "#today").slice(1);
-    if (ROUTES[view]) navigate(view);
-  });
 }
 
 async function navigate(view) {
   if (!ROUTES[view]) return;
+  if (view === currentView) return;          // no-op if already here — stops double render
+  currentView = view;
 
-  // Set hash without triggering a second navigate via hashchange
-  navigating = true;
-  location.hash = view;
-  requestAnimationFrame(() => { navigating = false; });
+  // Update hash silently (no hashchange fires if same value)
+  if (location.hash !== "#" + view) {
+    history.replaceState(null, "", "#" + view);
+  }
+
+  // Cancel any in-flight render
+  const myToken = ++renderToken;
 
   // Update rail
   document.querySelectorAll(".rail__link[data-view]").forEach(l => {
@@ -164,20 +166,22 @@ async function navigate(view) {
 
   // Header
   const route = ROUTES[view];
-  const dateEl = document.getElementById("stage-date");
-  dateEl.textContent = route.showDate ? longDate(new Date()) : "";
+  document.getElementById("stage-date").textContent = route.showDate ? longDate(new Date()) : "";
   document.getElementById("stage-title").textContent = route.title;
   document.getElementById("stage-actions").innerHTML = "";
 
-  // Render
+  // Body — clear immediately, render once
   const body = document.getElementById("view");
   body.innerHTML = "";
   body.style.opacity = 0;
   await sleep(80);
+  if (myToken !== renderToken) return;       // newer navigation came in, abandon
+
   try {
     await route.render(body, currentUserRef);
   } catch (err) {
     console.error(err);
+    if (myToken !== renderToken) return;
     body.innerHTML = "";
     body.appendChild(el("div", { class: "empty" },
       el("div", { class: "empty__icon" }, "⚠"),
@@ -185,5 +189,5 @@ async function navigate(view) {
       el("p", { class: "empty__sub" }, err.message || "Check the console.")
     ));
   }
-  body.style.opacity = 1;
+  if (myToken === renderToken) body.style.opacity = 1;
 }
