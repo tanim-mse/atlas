@@ -1,5 +1,5 @@
 import { sb } from "./supabase-client.js";
-import { $, el, isoDate, longDate, prettyDate, relativeDate, debounce, toast, modal } from "./util.js";
+import { el, isoDate, longDate, relativeDate, debounce, toast, modal, stagger, REDUCED } from "./util.js";
 
 let state = { entries: [], current: null, dirty: false, userId: null };
 
@@ -18,6 +18,10 @@ export async function renderJournal(root, user) {
   await loadEntries();
   renderList(listCol);
   await openToday(editorCol, listCol);
+
+  if (window.gsap && !REDUCED) {
+    gsap.from(layout, { opacity: 0, y: 16, duration: 0.7, ease: "power3.out" });
+  }
 }
 
 async function loadEntries() {
@@ -30,13 +34,12 @@ async function loadEntries() {
 
 function renderList(col) {
   col.innerHTML = "";
-  // "New today" button
   const newBtn = el("button", {
     class: "journal__item",
     style: { border: "1px dashed var(--line-2)", textAlign: "center" },
     onClick: () => openDate(isoDate(), document.getElementById("journal-editor"), col)
   });
-  newBtn.appendChild(el("div", { class: "journal__item-title", style: { color: "var(--a-cyan)" } }, "+ New entry · today"));
+  newBtn.appendChild(el("div", { class: "journal__item-title", style: { color: "var(--a-rose)" } }, "+ New entry · today"));
   col.appendChild(newBtn);
 
   if (!state.entries.length) {
@@ -67,10 +70,7 @@ async function openToday(editorCol, listCol) {
 async function openDate(date, editorCol, listCol) {
   const existing = state.entries.find(e => e.entry_date === date);
   if (existing) return openEntry(existing, editorCol, listCol);
-  // create blank draft in-memory; it persists on first save
-  const draft = {
-    id: null, entry_date: date, title: "", content: "", mood: null, energy: null, tags: [], _draft: true
-  };
+  const draft = { id: null, entry_date: date, title: "", content: "", mood: null, energy: null, tags: [], _draft: true };
   state.current = draft;
   renderEditor(editorCol, listCol);
   renderList(listCol);
@@ -89,17 +89,10 @@ function renderEditor(root, listCol) {
   const frame = el("div", { class: "editor" });
   frame.appendChild(el("div", { class: "editor__date" }, longDate(e.entry_date)));
 
-  const titleInput = el("input", {
-    class: "editor__title",
-    placeholder: "A title, if it needs one",
-    value: e.title || ""
-  });
-  titleInput.addEventListener("input", () => {
-    e.title = titleInput.value; state.dirty = true; autosave(listCol);
-  });
+  const titleInput = el("input", { class: "editor__title", placeholder: "A title, if it needs one", value: e.title || "" });
+  titleInput.addEventListener("input", () => { e.title = titleInput.value; state.dirty = true; autosave(listCol); });
   frame.appendChild(titleInput);
 
-  // Meta: mood/energy sliders + tags
   const meta = el("div", { class: "editor__meta" });
 
   const moodGroup = el("div", { class: "slider-group" });
@@ -130,14 +123,11 @@ function renderEditor(root, listCol) {
 
   frame.appendChild(meta);
 
-  // Tags
   const tagsWrap = el("div", { class: "editor__tags" });
   const renderTags = () => {
     tagsWrap.innerHTML = "";
     (e.tags || []).forEach((t, i) => {
-      const chip = el("span", { class: "chip" }, "#" + t);
-      chip.style.cursor = "pointer";
-      chip.title = "Click to remove";
+      const chip = el("span", { class: "chip", style: { cursor: "pointer" }, title: "Click to remove" }, "#" + t);
       chip.addEventListener("click", () => {
         e.tags.splice(i, 1); state.dirty = true; renderTags(); autosave(listCol);
       });
@@ -156,38 +146,33 @@ function renderEditor(root, listCol) {
   renderTags();
   frame.appendChild(tagsWrap);
 
-  // Content
   const content = el("textarea", {
     class: "editor__content",
     placeholder: "What happened today? What did you notice?",
     rows: "14"
   });
   content.value = e.content || "";
-  content.addEventListener("input", () => {
-    e.content = content.value; state.dirty = true; autosave(listCol);
-    autogrow(content);
-  });
+  content.addEventListener("input", () => { e.content = content.value; state.dirty = true; autosave(listCol); autogrow(content); });
   frame.appendChild(content);
   setTimeout(() => autogrow(content), 0);
 
-  // Footer
   const foot = el("div", { class: "editor__foot" });
   const statusEl = el("span", { id: "save-status" }, e._draft ? "draft" : "saved");
   foot.appendChild(statusEl);
 
   const actions = el("div", { style: { display: "flex", gap: "8px" } });
   if (!e._draft) {
-    const delBtn = el("button", {
-      class: "btn btn--sm btn--danger",
-      onClick: () => confirmDelete(listCol)
-    }, "Delete");
+    const delBtn = el("button", { class: "btn btn--sm btn--danger", onClick: () => confirmDelete(listCol) }, "Delete");
     actions.appendChild(delBtn);
   }
   foot.appendChild(actions);
   frame.appendChild(foot);
 
   root.appendChild(frame);
-  requestAnimationFrame(() => content.focus({ preventScroll: true }));
+
+  if (window.gsap && !REDUCED) {
+    gsap.from(frame, { opacity: 0, y: 12, duration: 0.5, ease: "power3.out" });
+  }
 }
 
 function autogrow(ta) {
@@ -210,12 +195,10 @@ const autosave = debounce(async (listCol) => {
   };
   if (e.id) {
     const { error } = await sb.from("journal_entries").update(payload).eq("id", e.id);
-    if (error) { console.error("Journal update error:", error); setStatus("error: " + error.message); return; }
+    if (error) { console.error(error); setStatus("error: " + error.message); return; }
   } else {
-    const { data, error } = await sb.from("journal_entries")
-      .insert({ ...payload, user_id: state.userId })
-      .select().single();
-    if (error) { console.error("Journal insert error:", error); setStatus("error: " + error.message); return; }
+    const { data, error } = await sb.from("journal_entries").insert({ ...payload, user_id: state.userId }).select().single();
+    if (error) { console.error(error); setStatus("error: " + error.message); return; }
     e.id = data.id; delete e._draft;
   }
   state.dirty = false;
