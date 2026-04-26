@@ -1,5 +1,5 @@
 import { sb, insertOwned } from "./supabase-client.js";
-import { el, toast, modal, longDate, isoDate, money } from "./util.js";
+import { el, toast, modal, longDate, isoDate, money, tickNumber, REDUCED } from "./util.js";
 
 // =========================================================
 // MEDIA
@@ -11,7 +11,7 @@ export async function renderMedia(root) {
   actions.appendChild(el("button", { class: "btn btn--sm btn--subtle", onClick: () => mediaModal(null, () => renderMedia(root)) }, "+ New entry"));
 
   const { data } = await sb.from("media_log").select("*").order("created_at", { ascending: false });
-  if (!data?.length) return root.appendChild(empty("No media logged", "Books, films, papers, shows."));
+  if (!data?.length) return root.appendChild(empty("Nothing logged yet", "Books, films, papers, shows."));
 
   const card = el("article", { class: "card table-card" });
   const table = el("table", { class: "table" });
@@ -32,6 +32,8 @@ export async function renderMedia(root) {
   table.appendChild(tbody);
   card.appendChild(table);
   root.appendChild(card);
+
+  if (window.gsap && !REDUCED) gsap.from(card, { y: 16, opacity: 0, duration: 0.6, ease: "power3.out" });
 }
 
 function mediaModal(existing, refresh) {
@@ -95,8 +97,8 @@ export async function renderGaming(root) {
   const ytCount = data.filter(x => x.recorded_for_yt).length;
   const summary = el("div", { class: "grid grid--3", style: { marginBottom: "20px" } });
   summary.appendChild(statCard("Total time", `${Math.floor(totalMins/60)}h ${totalMins%60}m`, "var(--grad-aurora)", "card--violet"));
-  summary.appendChild(statCard("Sessions", String(data.length), "var(--grad-ocean)", "card--cyan"));
-  summary.appendChild(statCard("Recorded for YT", String(ytCount), "var(--grad-ember)", "card--rose"));
+  summary.appendChild(statTickCard("Sessions", data.length, "var(--grad-ocean)", "card--cyan"));
+  summary.appendChild(statTickCard("Recorded for YT", ytCount, "var(--grad-ember)", "card--rose"));
   root.appendChild(summary);
 
   const card = el("article", { class: "card table-card" });
@@ -115,6 +117,9 @@ export async function renderGaming(root) {
   table.appendChild(tbody);
   card.appendChild(table);
   root.appendChild(card);
+
+  triggerTickers(root);
+  if (window.gsap && !REDUCED) gsap.from([summary, card], { y: 16, opacity: 0, duration: 0.6, stagger: 0.08, ease: "power3.out" });
 }
 
 function gamingModal(existing, refresh) {
@@ -188,6 +193,7 @@ export async function renderEdits(root) {
     grid.appendChild(card);
   });
   root.appendChild(grid);
+  if (window.gsap && !REDUCED) gsap.from(grid.children, { y: 18, opacity: 0, duration: 0.6, stagger: 0.05, ease: "power3.out" });
 }
 
 function editModal(existing, refresh) {
@@ -245,12 +251,16 @@ export async function renderFinance(root) {
   const income = (data || []).filter(t => t.kind === "income").reduce((s, t) => s + Number(t.amount), 0);
   const expense = (data || []).filter(t => t.kind === "expense").reduce((s, t) => s + Number(t.amount), 0);
   const summary = el("div", { class: "grid grid--3", style: { marginBottom: "20px" } });
-  summary.appendChild(statCard("Income", money(income), "var(--grad-ocean)", "card--jade"));
-  summary.appendChild(statCard("Expenses", money(expense), "var(--grad-ember)", "card--rose"));
-  summary.appendChild(statCard("Net", money(income - expense), income - expense >= 0 ? "var(--grad-aurora)" : "var(--grad-ember)", income - expense >= 0 ? "card--cyan" : "card--amber"));
+  summary.appendChild(statTickCard("Income", income, "var(--grad-ocean)", "card--jade", { prefix: "৳" }));
+  summary.appendChild(statTickCard("Expenses", expense, "var(--grad-ember)", "card--rose", { prefix: "৳" }));
+  const net = income - expense;
+  summary.appendChild(statTickCard("Net", Math.abs(net), net >= 0 ? "var(--grad-aurora)" : "var(--grad-ember)", net >= 0 ? "card--cyan" : "card--amber", { prefix: net < 0 ? "−৳" : "৳" }));
   root.appendChild(summary);
 
-  if (!data?.length) return root.appendChild(empty("No transactions", "Log income, expenses, categories."));
+  if (!data?.length) {
+    triggerTickers(root);
+    return root.appendChild(empty("No transactions", "Log income, expenses, categories."));
+  }
 
   const card = el("article", { class: "card table-card" });
   const table = el("table", { class: "table" });
@@ -269,6 +279,9 @@ export async function renderFinance(root) {
   table.appendChild(tbody);
   card.appendChild(table);
   root.appendChild(card);
+
+  triggerTickers(root);
+  if (window.gsap && !REDUCED) gsap.from([summary, card], { y: 16, opacity: 0, duration: 0.6, stagger: 0.08, ease: "power3.out" });
 }
 
 function txModal(existing, refresh) {
@@ -309,7 +322,7 @@ function txModal(existing, refresh) {
 }
 
 // =========================================================
-// HEALTH
+// HEALTH — with Apple-style ring trio
 // =========================================================
 export async function renderHealth(root) {
   root.innerHTML = "";
@@ -322,15 +335,34 @@ export async function renderHealth(root) {
   if (!data?.length) return root.appendChild(empty("No health logs", "Track sleep, water, movement."));
 
   const last7 = data.slice(0, 7);
+  const todays = data[0];
+
   const avg = (key) => {
     const vals = last7.map(d => d[key]).filter(v => v != null);
-    if (!vals.length) return "—";
-    return (vals.reduce((a,b) => a + Number(b), 0) / vals.length).toFixed(1);
+    if (!vals.length) return 0;
+    return +(vals.reduce((a,b) => a + Number(b), 0) / vals.length).toFixed(1);
   };
-  const summary = el("div", { class: "grid grid--4", style: { marginBottom: "20px" } });
-  summary.appendChild(statCard("Sleep (7d avg)", `${avg("sleep_hours")}h`, "var(--grad-cosmic)", "card--violet"));
-  summary.appendChild(statCard("Water (7d avg)", `${avg("water_ml")}ml`, "var(--grad-ocean)", "card--cyan"));
-  summary.appendChild(statCard("Move (7d avg)", `${avg("workout_minutes")}m`, "var(--grad-aurora)", "card--jade"));
+
+  // Ring trio — sleep/water/move based on today's log vs targets
+  const tSleep = todays?.sleep_hours ?? 0;
+  const tWater = todays?.water_ml ?? 0;
+  const tMove  = todays?.workout_minutes ?? 0;
+
+  const TARGETS = { sleep: 8, water: 2500, move: 30 };
+  const ringTrio = el("article", { class: "card card--rose", style: { padding: "30px 24px" } });
+  ringTrio.appendChild(el("div", { class: "card__eyebrow", style: { textAlign: "center", marginBottom: "16px" } }, "Today"));
+  const rings = el("div", { class: "ring-wrap" });
+  rings.appendChild(ringEl("Sleep", tSleep, TARGETS.sleep, "h", "var(--a-rose)"));
+  rings.appendChild(ringEl("Water", tWater, TARGETS.water, "ml", "var(--a-cyan)"));
+  rings.appendChild(ringEl("Move", tMove, TARGETS.move, "m", "var(--a-jade)"));
+  ringTrio.appendChild(rings);
+  root.appendChild(ringTrio);
+
+  // 7-day averages
+  const summary = el("div", { class: "grid grid--4", style: { margin: "20px 0" } });
+  summary.appendChild(statTickCard("Sleep avg", avg("sleep_hours"), "var(--grad-cosmic)", "card--violet", { decimals: 1, suffix: "h" }));
+  summary.appendChild(statTickCard("Water avg", avg("water_ml"), "var(--grad-ocean)", "card--cyan", { suffix: "ml" }));
+  summary.appendChild(statTickCard("Move avg", avg("workout_minutes"), "var(--grad-aurora)", "card--jade", { suffix: "m" }));
   summary.appendChild(statCard("Weight", data[0].weight_kg ? `${data[0].weight_kg}kg` : "—", "var(--grad-ember)", "card--amber"));
   root.appendChild(summary);
 
@@ -351,6 +383,27 @@ export async function renderHealth(root) {
   table.appendChild(tbody);
   card.appendChild(table);
   root.appendChild(card);
+
+  triggerTickers(root);
+  if (window.gsap && !REDUCED) gsap.from([ringTrio, summary, card], { y: 16, opacity: 0, duration: 0.6, stagger: 0.08, ease: "power3.out" });
+}
+
+function ringEl(label, value, target, unit, color) {
+  const wrap = el("div", { class: "ring", style: { "--ring-color": color } });
+  const pct = Math.min(1, value / target);
+  const C = 2 * Math.PI * 50;
+  const dashTarget = C * (1 - pct);
+  wrap.innerHTML = `
+    <svg viewBox="0 0 120 120">
+      <circle class="ring__bg" cx="60" cy="60" r="50"/>
+      <circle class="ring__fg" cx="60" cy="60" r="50" style="--circ:${C}; --ring-target:${dashTarget}"/>
+    </svg>
+    <div class="ring__center">
+      <div class="ring__value">${value}${unit}</div>
+      <div class="ring__label">${label}</div>
+    </div>
+  `;
+  return wrap;
 }
 
 function healthModal(existing, refresh) {
@@ -404,6 +457,37 @@ function statCard(label, value, gradient, accentClass = "") {
   c.appendChild(el("div", { class: "card__eyebrow" }, label));
   c.appendChild(el("div", { class: "card__big", style: { "--card-grad": gradient } }, value));
   return c;
+}
+
+function statTickCard(label, value, gradient, accentClass = "", opts = {}) {
+  const c = el("article", { class: `card ${accentClass}` });
+  c.appendChild(el("div", { class: "card__eyebrow" }, label));
+  const big = el("div", {
+    class: "card__big",
+    style: { "--card-grad": gradient },
+    "data-tick": String(value),
+    "data-decimals": String(opts.decimals || 0),
+    "data-prefix": opts.prefix || "",
+    "data-suffix": opts.suffix || ""
+  }, (opts.prefix || "") + "0" + (opts.suffix || ""));
+  c.appendChild(big);
+  return c;
+}
+
+function triggerTickers(root) {
+  requestAnimationFrame(() => {
+    root.querySelectorAll("[data-tick]").forEach(node => {
+      const target = Number(node.dataset.tick);
+      const decimals = Number(node.dataset.decimals || 0);
+      const prefix = node.dataset.prefix || "";
+      const suffix = node.dataset.suffix || "";
+      const opts = { duration: 850, decimals, prefix, suffix };
+      if (prefix === "৳" || prefix === "−৳") {
+        opts.format = (n) => prefix + Math.round(n).toLocaleString("en-IN");
+      }
+      tickNumber(node, target, opts);
+    });
+  });
 }
 
 function empty(title, sub) {
