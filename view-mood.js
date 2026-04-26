@@ -1,5 +1,5 @@
 import { sb } from "./supabase-client.js";
-import { $, el, isoDate, prettyDate, lastNDays } from "./util.js";
+import { el, isoDate, lastNDays, tickNumber, REDUCED } from "./util.js";
 
 export async function renderMood(root, user) {
   root.innerHTML = "";
@@ -11,38 +11,44 @@ export async function renderMood(root, user) {
     style: { padding: "6px 12px", cursor: "pointer" }
   });
   [[7,"7 days"],[30,"30 days"],[90,"90 days"],[365,"1 year"]].forEach(([v,l]) => {
-    const o = el("option", { value: v }, l); rangePicker.appendChild(o);
+    rangePicker.appendChild(el("option", { value: v }, l));
   });
   rangePicker.value = "30";
   rangePicker.addEventListener("change", () => draw(Number(rangePicker.value)));
   actions.appendChild(rangePicker);
 
-  const card = el("article", { class: "card chart-card" });
+  // Stat cards above chart
+  const statsRow = el("div", { class: "grid grid--3", id: "mood-stats", style: { marginBottom: "20px" } });
+  root.appendChild(statsRow);
+
+  const card = el("article", { class: "card chart-card card--violet" });
   const head = el("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: "20px" } });
   head.appendChild(el("div", {},
     el("div", { class: "card__eyebrow" }, "Mood & Energy"),
     el("h3", { class: "card__title" }, "Over time")
   ));
-  const stats = el("div", { style: { display: "flex", gap: "20px" } });
-  stats.id = "mood-stats";
-  head.appendChild(stats);
   card.appendChild(head);
-
   const chartWrap = el("div", { id: "mood-chart" });
   card.appendChild(chartWrap);
-
   root.appendChild(card);
 
+  // Insight
+  const insight = el("div", { id: "mood-insight", class: "card card--lilac", style: { marginTop: "16px", padding: "20px 24px" } });
+  root.appendChild(insight);
+
   await draw(30);
+
+  if (window.gsap && !REDUCED) {
+    gsap.from([statsRow, card, insight], { y: 18, opacity: 0, duration: 0.7, stagger: 0.08, ease: "power3.out" });
+  }
 }
 
 async function draw(days) {
   const from = isoDate(new Date(Date.now() - (days - 1) * 86400000));
-  const { data, error } = await sb.from("journal_entries")
+  const { data } = await sb.from("journal_entries")
     .select("entry_date, mood, energy")
     .gte("entry_date", from)
     .order("entry_date");
-  if (error) return;
 
   const byDate = new Map((data || []).map(d => [d.entry_date, d]));
   const allDays = lastNDays(days).map(d => {
@@ -53,25 +59,56 @@ async function draw(days) {
 
   const moods = allDays.filter(d => d.mood != null).map(d => d.mood);
   const energies = allDays.filter(d => d.energy != null).map(d => d.energy);
-  const avgMood = moods.length ? (moods.reduce((a,b) => a+b, 0) / moods.length).toFixed(1) : "—";
-  const avgEnergy = energies.length ? (energies.reduce((a,b) => a+b, 0) / energies.length).toFixed(1) : "—";
+  const avgMood = moods.length ? +(moods.reduce((a,b) => a+b, 0) / moods.length).toFixed(1) : 0;
+  const avgEnergy = energies.length ? +(energies.reduce((a,b) => a+b, 0) / energies.length).toFixed(1) : 0;
 
   const stats = document.getElementById("mood-stats");
   stats.innerHTML = "";
-  stats.appendChild(statBlock("avg mood", avgMood, "#7c5cff"));
-  stats.appendChild(statBlock("avg energy", avgEnergy, "#2ad9ff"));
-  stats.appendChild(statBlock("logged", `${moods.length}/${days}`, "#3ddc97"));
+  stats.appendChild(statBigCard("Avg mood", avgMood, "var(--grad-cosmic)", "card--violet", { decimals: 1 }));
+  stats.appendChild(statBigCard("Avg energy", avgEnergy, "var(--grad-ocean)", "card--cyan", { decimals: 1 }));
+  stats.appendChild(statBigCard("Days logged", moods.length, "var(--grad-aurora)", "card--rose", { decimals: 0, suffix: `/${days}` }));
+
+  // Tickers
+  requestAnimationFrame(() => {
+    stats.querySelectorAll("[data-tick]").forEach(node => {
+      const target = Number(node.dataset.tick);
+      const decimals = Number(node.dataset.decimals || 0);
+      const suffix = node.dataset.suffix || "";
+      tickNumber(node, target, { duration: 900, decimals, suffix });
+    });
+  });
 
   const wrap = document.getElementById("mood-chart");
   wrap.innerHTML = "";
   wrap.appendChild(chart(allDays, days));
+
+  // Insight
+  const insight = document.getElementById("mood-insight");
+  insight.innerHTML = "";
+  insight.appendChild(el("div", { class: "card__eyebrow" }, "Pattern"));
+  let txt = "Not enough data yet — keep logging.";
+  if (moods.length >= 7) {
+    const range = Math.max(...moods) - Math.min(...moods);
+    if (range <= 2) txt = "Your mood has been remarkably stable in this window.";
+    else if (avgMood >= 7) txt = "You've been trending well — average mood above 7.";
+    else if (avgMood <= 4) txt = "It's been a heavy stretch. The average sits below 5.";
+    else txt = `You averaged ${avgMood} for mood and ${avgEnergy} for energy across ${moods.length} entries.`;
+  }
+  insight.appendChild(el("p", { style: { fontFamily: "var(--serif)", fontSize: "18px", margin: "8px 0 0", color: "var(--ink-1)", lineHeight: "1.5" } }, txt));
 }
 
-function statBlock(label, value, color) {
-  const n = el("div", { style: { textAlign: "right" } });
-  n.appendChild(el("div", { style: { fontFamily: "var(--mono)", fontSize: "10px", letterSpacing: "0.2em", textTransform: "uppercase", color: "var(--ink-3)" } }, label));
-  n.appendChild(el("div", { style: { fontFamily: "var(--serif)", fontSize: "26px", color } }, value));
-  return n;
+function statBigCard(label, value, gradient, accentClass, opts = {}) {
+  const c = el("article", { class: `card ${accentClass}` });
+  c.appendChild(el("div", { class: "card__eyebrow" }, label));
+  const big = el("div", {
+    class: "card__big",
+    style: { "--card-grad": gradient },
+    "data-tick": String(value),
+    "data-decimals": String(opts.decimals || 0),
+    "data-suffix": opts.suffix || ""
+  }, "0");
+  c.appendChild(big);
+  return c;
 }
 
 function chart(days, total) {
@@ -84,7 +121,6 @@ function chart(days, total) {
   const xScale = i => P + (i / (days.length - 1)) * (W - P * 2);
   const yScale = v => H - P - ((v - 1) / 9) * (H - P * 2);
 
-  // Grid
   const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
   [1,3,5,7,10].forEach(v => {
     const y = yScale(v);
@@ -102,17 +138,13 @@ function chart(days, total) {
   });
   svg.appendChild(g);
 
-  // Gradients
   const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
   defs.innerHTML = `
     <linearGradient id="moodGrad" x1="0" x2="1"><stop offset="0%" stop-color="#7c5cff"/><stop offset="100%" stop-color="#ff5fa2"/></linearGradient>
     <linearGradient id="energyGrad" x1="0" x2="1"><stop offset="0%" stop-color="#2ad9ff"/><stop offset="100%" stop-color="#3ddc97"/></linearGradient>
-    <linearGradient id="moodArea" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#7c5cff" stop-opacity="0.3"/><stop offset="100%" stop-color="#7c5cff" stop-opacity="0"/></linearGradient>
-    <linearGradient id="energyArea" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stop-color="#2ad9ff" stop-opacity="0.3"/><stop offset="100%" stop-color="#2ad9ff" stop-opacity="0"/></linearGradient>
   `;
   svg.appendChild(defs);
 
-  // Build paths (gaps on null)
   const build = (key) => {
     const segments = [];
     let cur = [];
@@ -129,24 +161,23 @@ function chart(days, total) {
 
   if (moodPath) {
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    p.setAttribute("d", moodPath); p.setAttribute("class", "line");
-    p.setAttribute("stroke", "url(#moodGrad)");
+    p.setAttribute("d", moodPath); p.setAttribute("class", "line"); p.setAttribute("stroke", "url(#moodGrad)");
     svg.appendChild(p);
   }
   if (energyPath) {
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    p.setAttribute("d", energyPath); p.setAttribute("class", "line");
-    p.setAttribute("stroke", "url(#energyGrad)");
+    p.setAttribute("d", energyPath); p.setAttribute("class", "line"); p.setAttribute("stroke", "url(#energyGrad)");
+    p.style.animationDelay = "0.4s";
     svg.appendChild(p);
   }
 
-  // Dots
+  // Stagger dots in
+  let dotIdx = 0;
   days.forEach((d, i) => {
-    if (d.mood != null) svg.appendChild(dot(xScale(i), yScale(d.mood), "#7c5cff"));
-    if (d.energy != null) svg.appendChild(dot(xScale(i), yScale(d.energy), "#2ad9ff"));
+    if (d.mood != null) { svg.appendChild(dot(xScale(i), yScale(d.mood), "#7c5cff", dotIdx++ * 22)); }
+    if (d.energy != null) { svg.appendChild(dot(xScale(i), yScale(d.energy), "#2ad9ff", dotIdx++ * 22)); }
   });
 
-  // X axis labels (sparse)
   const labelCount = Math.min(6, days.length);
   for (let i = 0; i < labelCount; i++) {
     const idx = Math.round(i * (days.length - 1) / (labelCount - 1));
@@ -159,7 +190,6 @@ function chart(days, total) {
     svg.appendChild(t);
   }
 
-  // Legend
   const leg = document.createElementNS("http://www.w3.org/2000/svg", "g");
   leg.innerHTML = `
     <circle cx="${W - 180}" cy="${P - 18}" r="4" fill="#7c5cff"/>
@@ -172,10 +202,11 @@ function chart(days, total) {
   return svg;
 }
 
-function dot(x, y, color) {
+function dot(x, y, color, delay) {
   const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
   c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", 3);
   c.setAttribute("fill", color);
   c.setAttribute("class", "dot");
+  c.style.animationDelay = (1200 + delay) + "ms";
   return c;
 }
