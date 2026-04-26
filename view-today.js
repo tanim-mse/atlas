@@ -1,5 +1,5 @@
 import { sb } from "./supabase-client.js";
-import { el, isoDate, lastNDays, money } from "./util.js";
+import { el, isoDate, lastNDays, money, longDate, greeting, tickNumber, stagger, observeReveal, REDUCED } from "./util.js";
 
 const ARROW_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M17 7H9M17 7v8"/></svg>`;
 const ICON = {
@@ -11,13 +11,37 @@ const ICON = {
   gaming:  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="7" width="18" height="12" rx="3"/><path d="M8 13h.01M12 13h.01M16 13h.01"/></svg>`
 };
 
-function go(view) {
-  window.dispatchEvent(new CustomEvent("atlas:navigate", { detail: view }));
+function go(view, fromCard) {
+  window.dispatchEvent(new CustomEvent("atlas:navigate", { detail: { view, fromCard } }));
 }
 
 export async function renderToday(root, user) {
   root.innerHTML = "";
-  const grid = el("div", { class: "grid grid--3" });
+
+  // Replace header with cinematic greeting
+  const head = document.querySelector(".stage__head > div");
+  head.innerHTML = "";
+  head.appendChild(el("div", { class: "stage__date" }, longDate(new Date())));
+  const name = (user.email || "").split("@")[0].split(".")[0];
+  const cap = name ? name.charAt(0).toUpperCase() + name.slice(1) : "you";
+  const g = el("h1", { class: "stage__greeting" });
+  g.innerHTML = `<span class="word">${greeting()},</span> <span class="word accent">${cap}.</span>`;
+  head.appendChild(g);
+
+  document.getElementById("stage-actions").innerHTML = "";
+
+  // Animate greeting words
+  if (window.gsap) {
+    gsap.from(g.querySelectorAll(".word"), {
+      y: 40,
+      opacity: 0,
+      duration: 0.9,
+      stagger: 0.08,
+      ease: "power3.out"
+    });
+  }
+
+  const grid = el("div", { class: "bento" });
   root.appendChild(grid);
 
   const d = isoDate();
@@ -34,22 +58,50 @@ export async function renderToday(root, user) {
     sb.from("gaming_sessions").select("duration_minutes").gte("session_date", weekStart)
   ]);
 
-  grid.appendChild(journalCard(journalRes.data));
-  grid.appendChild(habitsCard(habitsRes.data || [], habitLogsRes.data || []));
-  grid.appendChild(moodCard(moodRes.data || []));
-  grid.appendChild(financeCard(txRes.data || []));
-  grid.appendChild(healthCard(healthRes.data));
-  grid.appendChild(gamingCard(gamingRes.data || []));
+  const cards = [
+    journalCard(journalRes.data, "bento__journal"),
+    habitsCard(habitsRes.data || [], habitLogsRes.data || [], "bento__habits"),
+    moodCard(moodRes.data || [], "bento__mood"),
+    financeCard(txRes.data || [], "bento__finance"),
+    healthCard(healthRes.data, "bento__health"),
+    gamingCard(gamingRes.data || [], "bento__gaming")
+  ];
+  cards.forEach(c => grid.appendChild(c));
+
+  if (window.gsap && !REDUCED) {
+    gsap.from(cards, {
+      y: 24,
+      opacity: 0,
+      duration: 0.8,
+      stagger: 0.06,
+      ease: "power3.out",
+      delay: 0.2,
+      clearProps: "all"
+    });
+  }
+
+  // After paint: trigger number tickers
+  requestAnimationFrame(() => {
+    grid.querySelectorAll("[data-tick]").forEach(node => {
+      const target = Number(node.dataset.tick);
+      const decimals = Number(node.dataset.decimals || 0);
+      const prefix = node.dataset.prefix || "";
+      const suffix = node.dataset.suffix || "";
+      tickNumber(node, target, { duration: 850, decimals, prefix, suffix });
+    });
+  });
 }
 
-function makeCard(accentClass, viewTo) {
-  const card = el("article", { class: `card card--clickable ${accentClass}`, onClick: () => go(viewTo) });
+function makeCard(accentClass, viewTo, extraClass = "") {
+  const card = el("article", {
+    class: `card card--clickable ${accentClass} ${extraClass}`,
+    onClick: () => go(viewTo, card)
+  });
   const arrow = el("div", { class: "card__arrow" });
   arrow.innerHTML = ARROW_SVG;
   card.appendChild(arrow);
   return card;
 }
-
 function cardHead(label, iconSvg) {
   const head = el("div", { class: "card__head" });
   head.appendChild(el("div", { class: "card__eyebrow" }, label));
@@ -61,90 +113,107 @@ function cardHead(label, iconSvg) {
   return head;
 }
 
-function journalCard(entry) {
-  const card = makeCard("card--violet", "journal");
+function journalCard(entry, slot) {
+  const card = makeCard("card--violet", "journal", slot);
   card.appendChild(cardHead("Journal · today", ICON.journal));
   if (entry) {
-    card.appendChild(el("h3", { class: "card__title" }, entry.title || "Untitled entry"));
-    const preview = (entry.content || "").slice(0, 130);
-    card.appendChild(el("p", { class: "card__sub", style: { marginTop: "8px" } }, preview + ((entry.content || "").length > 130 ? "…" : "")));
-    const chips = el("div", { style: { display: "flex", gap: "8px", marginTop: "14px" } });
+    card.appendChild(el("h3", { class: "card__title", style: { fontSize: "26px", marginBottom: "12px" } }, entry.title || "Untitled entry"));
+    const preview = (entry.content || "").slice(0, 220);
+    card.appendChild(el("p", {
+      class: "card__sub",
+      style: { fontFamily: "var(--serif)", fontSize: "16px", lineHeight: "1.6", color: "var(--ink-2)", marginTop: "4px" }
+    }, preview + ((entry.content || "").length > 220 ? "…" : "")));
+    const chips = el("div", { style: { display: "flex", gap: "8px", marginTop: "auto", paddingTop: "20px" } });
     if (entry.mood) chips.appendChild(el("span", { class: "chip" }, `mood ${entry.mood}`));
     if (entry.energy) chips.appendChild(el("span", { class: "chip" }, `energy ${entry.energy}`));
+    chips.appendChild(el("span", { class: "chip", style: { color: "var(--a-violet)" } }, "Continue writing →"));
     card.appendChild(chips);
   } else {
-    card.appendChild(el("h3", { class: "card__title" }, "Nothing written yet."));
-    card.appendChild(el("p", { class: "card__sub", style: { marginTop: "6px" } }, "The page is waiting."));
+    card.appendChild(el("h3", { class: "card__title", style: { fontSize: "30px" } }, "The page is waiting."));
+    card.appendChild(el("p", { class: "card__sub", style: { marginTop: "10px", fontFamily: "var(--serif)", fontStyle: "italic", fontSize: "15px" } }, "Start with today."));
+    card.appendChild(el("div", { style: { marginTop: "auto", paddingTop: "20px" } },
+      el("span", { class: "chip", style: { color: "var(--a-violet)" } }, "Open editor →")
+    ));
   }
   return card;
 }
 
-function habitsCard(habits, logs) {
-  const card = makeCard("card--cyan", "habits");
-  card.appendChild(cardHead("Habits · this week", ICON.habits));
+function habitsCard(habits, logs, slot) {
+  const card = makeCard("card--cyan", "habits", slot);
+  card.appendChild(cardHead("Habits", ICON.habits));
   if (!habits.length) {
-    card.appendChild(el("h3", { class: "card__title" }, "No habits yet."));
-    card.appendChild(el("p", { class: "card__sub", style: { marginTop: "6px" } }, "Build the scaffolding of your days."));
+    card.appendChild(el("h3", { class: "card__title" }, "No habits."));
+    card.appendChild(el("p", { class: "card__sub", style: { marginTop: "6px" } }, "Build the scaffolding."));
     return card;
   }
   const today = isoDate();
   const doneToday = logs.filter(l => l.log_date === today).length;
-  card.appendChild(el("div", { class: "card__big", style: { "--card-grad": "var(--grad-ocean)" } }, `${doneToday}/${habits.length}`));
-  card.appendChild(el("div", { class: "card__sub" }, `${habits.length} habit${habits.length !== 1 ? "s" : ""} tracked`));
+  const pct = habits.length ? doneToday / habits.length : 0;
 
-  const days = lastNDays(7);
-  const row = el("div", { style: { display: "flex", gap: "4px", marginTop: "16px" } });
-  days.forEach(d => {
-    const iso = isoDate(d);
-    const count = logs.filter(l => l.log_date === iso).length;
-    const pct = habits.length ? count / habits.length : 0;
-    const cell = el("div", {
-      style: {
-        flex: "1", height: "26px", borderRadius: "5px",
-        background: pct > 0
-          ? `linear-gradient(135deg, rgba(42,217,255,${0.25 + pct * 0.6}), rgba(61,220,151,${0.25 + pct * 0.6}))`
-          : "rgba(255,255,255,0.04)",
-        border: "1px solid var(--line)",
-        boxShadow: pct > 0 ? `0 4px 12px rgba(42,217,255,${0.15 * pct})` : "none"
-      }
-    });
-    row.appendChild(cell);
-  });
-  card.appendChild(row);
+  // Ring
+  const ringWrap = el("div", { style: { display: "flex", justifyContent: "center", margin: "8px 0 14px" } });
+  const ring = el("div", { class: "ring", style: { "--ring-color": "var(--a-jade)" } });
+  const C = 2 * Math.PI * 50;
+  const target = C * (1 - pct);
+  ring.innerHTML = `
+    <svg viewBox="0 0 120 120">
+      <circle class="ring__bg" cx="60" cy="60" r="50"/>
+      <circle class="ring__fg" cx="60" cy="60" r="50" style="--circ:${C}; --ring-target:${target}"/>
+    </svg>
+    <div class="ring__center">
+      <div class="ring__value" data-tick="${doneToday}">${doneToday}</div>
+      <div class="ring__label">of ${habits.length}</div>
+    </div>
+  `;
+  ringWrap.appendChild(ring);
+  card.appendChild(ringWrap);
+
+  card.appendChild(el("div", {
+    style: { textAlign: "center", fontFamily: "var(--mono)", fontSize: "10px", letterSpacing: "0.2em", textTransform: "uppercase", color: "var(--ink-3)" }
+  }, `${Math.round(pct * 100)}% complete today`));
+
   return card;
 }
 
-function moodCard(entries) {
-  const card = makeCard("card--lilac", "mood");
+function moodCard(entries, slot) {
+  const card = makeCard("card--lilac", "mood", slot);
   card.appendChild(cardHead("Mood · 30 days", ICON.mood));
   const vals = entries.filter(e => e.mood).map(e => e.mood);
-  const avg = vals.length ? (vals.reduce((a,b) => a+b, 0) / vals.length).toFixed(1) : "—";
-  card.appendChild(el("div", { class: "card__big", style: { "--card-grad": "var(--grad-cosmic)" } }, avg));
+  const avg = vals.length ? +(vals.reduce((a,b) => a+b, 0) / vals.length).toFixed(1) : 0;
+  card.appendChild(el("div", {
+    class: "card__big",
+    style: { "--card-grad": "var(--grad-cosmic)" },
+    "data-tick": String(avg),
+    "data-decimals": "1"
+  }, "0.0"));
   card.appendChild(el("div", { class: "card__sub" }, vals.length ? `avg across ${vals.length} entries` : "no data yet"));
-
-  if (vals.length > 1) {
-    card.appendChild(sparkline(entries.map(e => e.mood), 60));
-  }
+  if (vals.length > 1) card.appendChild(sparkline(entries.map(e => e.mood), 60, "spark1", ["#7c5cff","#ff5fa2"]));
   return card;
 }
 
-function financeCard(txs) {
-  const card = makeCard("card--jade", "finance");
+function financeCard(txs, slot) {
+  const card = makeCard("card--jade", "finance", slot);
   card.appendChild(cardHead("Finance · 30 days", ICON.finance));
   const income = txs.filter(t => t.kind === "income").reduce((s, t) => s + Number(t.amount), 0);
   const expense = txs.filter(t => t.kind === "expense").reduce((s, t) => s + Number(t.amount), 0);
   const net = income - expense;
   const grad = net >= 0 ? "var(--grad-ocean)" : "var(--grad-ember)";
-  card.appendChild(el("div", { class: "card__big", style: { "--card-grad": grad } }, money(net)));
-  const row = el("div", { style: { display: "flex", gap: "12px", marginTop: "8px", fontSize: "12px", fontFamily: "var(--mono)", color: "var(--ink-3)" } });
+  const big = el("div", {
+    class: "card__big",
+    style: { "--card-grad": grad },
+    "data-tick": String(Math.abs(net)),
+    "data-prefix": net < 0 ? "−৳" : "৳"
+  }, "৳0");
+  card.appendChild(big);
+  const row = el("div", { style: { display: "flex", gap: "14px", marginTop: "8px", fontSize: "12px", fontFamily: "var(--mono)", color: "var(--ink-3)" } });
   row.appendChild(el("span", { style: { color: "var(--a-jade)" } }, `↑ ${money(income)}`));
   row.appendChild(el("span", { style: { color: "var(--a-rose)" } }, `↓ ${money(expense)}`));
   card.appendChild(row);
   return card;
 }
 
-function healthCard(h) {
-  const card = makeCard("card--rose", "health");
+function healthCard(h, slot) {
+  const card = makeCard("card--rose", "health", slot);
   card.appendChild(cardHead("Health · today", ICON.health));
   if (!h) {
     card.appendChild(el("h3", { class: "card__title" }, "Untracked."));
@@ -159,8 +228,8 @@ function healthCard(h) {
   return card;
 }
 
-function gamingCard(sessions) {
-  const card = makeCard("card--amber", "gaming");
+function gamingCard(sessions, slot) {
+  const card = makeCard("card--amber", "gaming", slot);
   card.appendChild(cardHead("Gaming · this week", ICON.gaming));
   const mins = sessions.reduce((s, x) => s + (x.duration_minutes || 0), 0);
   const h = Math.floor(mins / 60), m = mins % 60;
@@ -176,7 +245,7 @@ function stat(label, value) {
   return n;
 }
 
-function sparkline(data, height = 60) {
+function sparkline(data, height = 60, gradId = "spark", colors = ["#7c5cff","#ff5fa2"]) {
   const vals = data.map(v => v == null ? null : Number(v));
   const real = vals.filter(v => v != null);
   if (real.length < 2) return el("div");
@@ -192,14 +261,15 @@ function sparkline(data, height = 60) {
 
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-  svg.setAttribute("width", "100%");
-  svg.setAttribute("height", h);
+  svg.setAttribute("class", "spark");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.style.height = h + "px";
   svg.style.marginTop = "14px";
   svg.innerHTML = `
     <defs>
-      <linearGradient id="spark1" x1="0" x2="1"><stop offset="0%" stop-color="#8b5cff"/><stop offset="100%" stop-color="#ff4d8f"/></linearGradient>
+      <linearGradient id="${gradId}" x1="0" x2="1"><stop offset="0%" stop-color="${colors[0]}"/><stop offset="100%" stop-color="${colors[1]}"/></linearGradient>
     </defs>
-    <path d="${d}" fill="none" stroke="url(#spark1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="${d}" class="line" stroke="url(#${gradId})"/>
   `;
   return svg;
 }
