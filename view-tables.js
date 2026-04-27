@@ -98,7 +98,7 @@ export async function renderGaming(root) {
   const summary = el("div", { class: "grid grid--3", style: { marginBottom: "20px" } });
   summary.appendChild(statCard("Total time", `${Math.floor(totalMins/60)}h ${totalMins%60}m`, "var(--grad-aurora)", "card--violet"));
   summary.appendChild(statTickCard("Sessions", data.length, "var(--grad-ocean)", "card--cyan"));
-  summary.appendChild(statTickCard("Recorded for YT", ytCount, "var(--grad-ember)", "card--rose"));
+  summary.appendChild(statTickCard("Recorded for YT", ytCount, "var(--grad-ember)", "card--amber"));
   root.appendChild(summary);
 
   const card = el("article", { class: "card table-card" });
@@ -111,7 +111,7 @@ export async function renderGaming(root) {
     tr.appendChild(el("td", { style: { fontFamily: "var(--serif)", fontSize: "15px" } }, s.game));
     tr.appendChild(el("td", {}, s.duration_minutes ? `${Math.floor(s.duration_minutes/60)}h ${s.duration_minutes%60}m` : "—"));
     tr.appendChild(el("td", { style: { color: "var(--ink-2)" } }, s.highlight || "—"));
-    tr.appendChild(el("td", {}, s.recorded_for_yt ? el("span", { class: "chip", style: { color: "var(--a-rose)" } }, "●") : "—"));
+    tr.appendChild(el("td", {}, s.recorded_for_yt ? el("span", { class: "chip", style: { color: "var(--a-amber)" } }, "●") : "—"));
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -176,7 +176,7 @@ export async function renderEdits(root) {
   if (!data?.length) return root.appendChild(empty("No edit projects", "When you pick editing back up, track it here."));
 
   const grid = el("div", { class: "grid grid--2" });
-  const accents = ["card--violet", "card--cyan", "card--rose", "card--amber", "card--jade", "card--lilac"];
+  const accents = ["card--violet", "card--cyan", "card--jade", "card--amber", "card--lilac"];
   data.forEach((p, i) => {
     const card = el("article", { class: `card card--clickable ${accents[i % accents.length]}`, onClick: () => editModal(p, () => renderEdits(root)) });
     card.appendChild(el("div", { class: "card__eyebrow" }, p.software || "project"));
@@ -252,7 +252,7 @@ export async function renderFinance(root) {
   const expense = (data || []).filter(t => t.kind === "expense").reduce((s, t) => s + Number(t.amount), 0);
   const summary = el("div", { class: "grid grid--3", style: { marginBottom: "20px" } });
   summary.appendChild(statTickCard("Income", income, "var(--grad-ocean)", "card--jade", { prefix: "৳" }));
-  summary.appendChild(statTickCard("Expenses", expense, "var(--grad-ember)", "card--rose", { prefix: "৳" }));
+  summary.appendChild(statTickCard("Expenses", expense, "var(--grad-ember)", "card--amber", { prefix: "৳" }));
   const net = income - expense;
   summary.appendChild(statTickCard("Net", Math.abs(net), net >= 0 ? "var(--grad-aurora)" : "var(--grad-ember)", net >= 0 ? "card--cyan" : "card--amber", { prefix: net < 0 ? "−৳" : "৳" }));
   root.appendChild(summary);
@@ -349,10 +349,10 @@ export async function renderHealth(root) {
   const tMove  = todays?.workout_minutes ?? 0;
 
   const TARGETS = { sleep: 8, water: 2500, move: 30 };
-  const ringTrio = el("article", { class: "card card--rose", style: { padding: "30px 24px" } });
+  const ringTrio = el("article", { class: "card card--jade", style: { padding: "30px 24px" } });
   ringTrio.appendChild(el("div", { class: "card__eyebrow", style: { textAlign: "center", marginBottom: "16px" } }, "Today"));
   const rings = el("div", { class: "ring-wrap" });
-  rings.appendChild(ringEl("Sleep", tSleep, TARGETS.sleep, "h", "var(--a-rose)"));
+  rings.appendChild(ringEl("Sleep", tSleep, TARGETS.sleep, "h", "var(--a-violet)"));
   rings.appendChild(ringEl("Water", tWater, TARGETS.water, "ml", "var(--a-cyan)"));
   rings.appendChild(ringEl("Move", tMove, TARGETS.move, "m", "var(--a-jade)"));
   ringTrio.appendChild(rings);
@@ -391,12 +391,13 @@ export async function renderHealth(root) {
 function ringEl(label, value, target, unit, color) {
   const wrap = el("div", { class: "ring", style: { "--ring-color": color } });
   const pct = Math.min(1, value / target);
-  const C = 2 * Math.PI * 50;
+  const R = 58;
+  const C = 2 * Math.PI * R;
   const dashTarget = C * (1 - pct);
   wrap.innerHTML = `
-    <svg viewBox="0 0 120 120">
-      <circle class="ring__bg" cx="60" cy="60" r="50"/>
-      <circle class="ring__fg" cx="60" cy="60" r="50" style="--circ:${C}; --ring-target:${dashTarget}"/>
+    <svg viewBox="0 0 132 132">
+      <circle class="ring__bg" cx="66" cy="66" r="${R}"/>
+      <circle class="ring__fg" cx="66" cy="66" r="${R}" style="--circ:${C}; --ring-target:${dashTarget}"/>
     </svg>
     <div class="ring__center">
       <div class="ring__value">${value}${unit}</div>
